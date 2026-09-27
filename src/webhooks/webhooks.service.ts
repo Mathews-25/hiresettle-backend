@@ -8,6 +8,19 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 const DEFAULT_FAILURE_THRESHOLD = 50;
 
+/**
+ * Current webhook payload format version. Bump this when the payload shape
+ * changes so consumers can opt into the new format via their subscription.
+ */
+export const CURRENT_WEBHOOK_VERSION = 1;
+
+/**
+ * Oldest payload version still supported. Subscriptions pinned to a version
+ * below this are upgraded to CURRENT_WEBHOOK_VERSION. Older versions remain
+ * deliverable during the deprecation window instead of breaking consumers.
+ */
+export const MIN_SUPPORTED_WEBHOOK_VERSION = 1;
+
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
@@ -26,6 +39,29 @@ export class WebhooksService {
     return Number.isFinite(configured) && configured > 0
       ? configured
       : DEFAULT_FAILURE_THRESHOLD;
+  }
+
+  /**
+   * Resolve the payload version a subscription is pinned to. Subscriptions
+   * without an explicit version default to the current format, and versions
+   * below the supported floor are clamped up so deliveries never break.
+   */
+  getSubscriptionVersion(subscription: WebhookSubscription): number {
+    const version = subscription.version ?? CURRENT_WEBHOOK_VERSION;
+    return version < MIN_SUPPORTED_WEBHOOK_VERSION
+      ? MIN_SUPPORTED_WEBHOOK_VERSION
+      : version;
+  }
+
+  /**
+   * Build the headers sent with every webhook delivery, including the
+   * X-Webhook-Version header reflecting the subscription's payload version.
+   */
+  buildDeliveryHeaders(subscription: WebhookSubscription): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'X-Webhook-Version': String(this.getSubscriptionVersion(subscription)),
+    };
   }
 
   async recordDeliverySuccess(subscriptionId: string): Promise<void> {
